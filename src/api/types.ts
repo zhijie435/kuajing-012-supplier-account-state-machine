@@ -83,8 +83,27 @@ export interface TransitionLog {
   created_at_text: string
 }
 
+export interface ErrorContext {
+  current_status: string
+  event: string
+  rollback_event: AccountEvent | null
+  can_rollback: boolean
+  retryable: boolean
+}
+
 export interface ApiResult<T> {
   code: number
   message: string
   data: T
+}
+
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+    public context: ErrorContext | null = null
+  ) {
+    super(message)
+    this.name = 'ApiError'
+  }
 }

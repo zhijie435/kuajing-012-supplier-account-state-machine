@@ -10,7 +10,7 @@ require_once __DIR__ . '/AccountStateMachine.php';
  * 领域异常：状态机不允许的迁移或资源不存在时抛出。
  * 由路由层（index.php）捕获并翻译为 HTTP 响应，保持服务层与传输解耦。
  */
-final class StateException extends RuntimeException
+class StateException extends RuntimeException
 {
     public function __construct(string $message, private int $status = 422)
     {
@@ -20,6 +20,41 @@ final class StateException extends RuntimeException
     public function status(): int
     {
         return $this->status;
+    }
+
+    public function context(): array
+    {
+        return [];
+    }
+}
+
+/**
+ * 状态迁移异常：包含更丰富的上下文信息，
+ * 用于前端展示回滚提示和重试入口。
+ */
+final class StateTransitionException extends StateException
+{
+    public function __construct(
+        string $message,
+        int $status = 422,
+        private string $currentStatus = '',
+        private string $event = '',
+        private ?string $rollbackEvent = null,
+        private bool $canRollback = false,
+        private bool $retryable = false
+    ) {
+        parent::__construct($message, $status);
+    }
+
+    public function context(): array
+    {
+        return [
+            'current_status' => $this->currentStatus,
+            'event' => $this->event,
+            'rollback_event' => $this->rollbackEvent,
+            'can_rollback' => $this->canRollback,
+            'retryable' => $this->retryable,
+        ];
     }
 }
 
@@ -126,7 +161,15 @@ final class AccountService
 
         $check = $this->fsm->engine()->canTransition($from, $event, $context);
         if (!$check['ok']) {
-            throw new StateException($check['message'], 422);
+            $rollbackEvent = $this->getRollbackEventFor($event, $from);
+            throw new StateTransitionException(
+                $check['message'],
+                422,
+                $from,
+                $event,
+                $rollbackEvent,
+                $rollbackEvent !== null
+            );
         }
         $to = $check['to'];
 
@@ -176,17 +219,57 @@ final class AccountService
                 break;
         }
 
-        $set = implode(', ', array_map(fn($k) => "$k = :$k", array_keys($patch)));
-        $params = array_merge([':id' => $id], array_combine(
-            array_map(fn($k) => ":$k", array_keys($patch)),
-            array_values($patch)
-        ));
-        $stmt = $this->pdo->prepare("UPDATE accounts SET $set WHERE id = :id");
-        $stmt->execute($params);
+        $rollbackEvent = $this->getRollbackEventFor($event, $from);
 
-        $this->logTransition($id, $event, $from, $to, $context['operator'], $context['reason'], $input['meta'] ?? null);
+        try {
+            $this->pdo->beginTransaction();
+
+            $set = implode(', ', array_map(fn($k) => "$k = :$k", array_keys($patch)));
+            $params = array_merge([':id' => $id], array_combine(
+                array_map(fn($k) => ":$k", array_keys($patch)),
+                array_values($patch)
+            ));
+            $stmt = $this->pdo->prepare("UPDATE accounts SET $set WHERE id = :id");
+            $stmt->execute($params);
+
+            $this->logTransition($id, $event, $from, $to, $context['operator'], $context['reason'], $input['meta'] ?? null);
+
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw new StateTransitionException(
+                '操作执行失败：' . $e->getMessage(),
+                500,
+                $from,
+                $event,
+                $rollbackEvent,
+                true,
+                true
+            );
+        }
 
         return $this->get($id);
+    }
+
+    /** 根据当前事件和状态，获取对应的回滚事件（如果存在）。 */
+    private function getRollbackEventFor(string $event, string $currentStatus): ?string
+    {
+        $map = [
+            AccountStateMachine::E_SUBMIT => AccountStateMachine::E_ROLLBACK_SUBMIT,
+            AccountStateMachine::E_APPROVE => AccountStateMachine::E_ROLLBACK_APPROVE,
+            AccountStateMachine::E_REJECT => AccountStateMachine::E_ROLLBACK_REJECT,
+            AccountStateMachine::E_FREEZE => AccountStateMachine::E_ROLLBACK_FREEZE,
+        ];
+
+        $rollbackEvent = $map[$event] ?? null;
+        if ($rollbackEvent === null) {
+            return null;
+        }
+
+        $check = $this->fsm->engine()->canTransition($currentStatus, $rollbackEvent, ['reason' => 'check_only']);
+        return $check['ok'] ? $rollbackEvent : null;
     }
 
     public function history(int $id): array

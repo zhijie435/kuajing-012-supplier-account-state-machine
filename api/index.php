@@ -73,7 +73,7 @@ try {
 
     Response::fail('Not Found: ' . $method . ' ' . $uri, 404);
 } catch (StateException $e) {
-    Response::fail($e->getMessage(), $e->status());
+    Response::fail($e->getMessage(), $e->status(), $e->context());
 } catch (Throwable $e) {
     Response::fail('服务器内部错误：' . $e->getMessage(), 500);
 }

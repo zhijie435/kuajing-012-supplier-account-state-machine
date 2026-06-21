@@ -2,9 +2,11 @@ import type {
   Account,
   AccountEvent,
   ApiResult,
+  ErrorContext,
   StateMachineDefinition,
   TransitionLog,
 } from './types'
+import { ApiError } from './types'
 
 const BASE = '/api'
 
@@ -13,14 +15,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { 'Content-Type': 'application/json' },
     ...init,
   })
-  let payload: ApiResult<T>
+  let payload: ApiResult<T> & { data?: ErrorContext }
   try {
-    payload = (await res.json()) as ApiResult<T>
+    payload = (await res.json()) as ApiResult<T> & { data?: ErrorContext }
   } catch {
-    throw new Error('服务器返回了无法解析的内容')
+    throw new ApiError('服务器返回了无法解析的内容', res.status)
   }
   if (!res.ok || payload.code !== 0) {
-    throw new Error(payload?.message || `请求失败 (${res.status})`)
+    const ctx = payload?.data && typeof payload.data === 'object' && 'can_rollback' in payload.data
+      ? (payload.data as unknown as ErrorContext)
+      : null
+    throw new ApiError(payload?.message || `请求失败 (${res.status})`, res.status, ctx)
   }
   return payload.data
 }
