@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ChevronRight, Plus, RefreshCw, Search } from 'lucide-vue-next'
+import { ChevronRight, Plus, RefreshCw, Search, Shield, User } from 'lucide-vue-next'
 import type { Account, AccountStatus } from '@/api/types'
 import { STATUS_META, STATUS_ORDER } from '@/lib/statusMeta'
 import { useAccounts } from '@/composables/useAccounts'
@@ -12,7 +12,19 @@ import CreateAccountDialog from '@/components/CreateAccountDialog.vue'
 const router = useRouter()
 const route = useRoute()
 
-const { accounts, loading, loadList, addAccount, markDirty } = useAccounts()
+const { accounts, loading, loadList, addAccount, markDirty, operator, currentRole, setOperator } = useAccounts()
+
+const ROLE_OPTIONS = [
+  { prefix: 'admin_root', label: '系统管理员 (admin_)', role: '系统管理员' as const },
+  { prefix: 'reviewer_01', label: '审核专员 (reviewer_)', role: '审核专员' as const },
+  { prefix: 'supplier_01', label: '供应商运营 (supplier_)', role: '供应商运营' as const },
+  { prefix: 'risk_01', label: '风控专员 (risk_)', role: '风控专员' as const },
+]
+
+function onOperatorChange(prefix: string) {
+  setOperator(prefix)
+  load(true)
+}
 
 const keyword = ref('')
 const statusFilter = ref<AccountStatus | 'all'>('all')
@@ -92,7 +104,27 @@ watch(keyword, () => scheduleLoad())
           统一沉淀结算账户「审核通过 / 驳回 / 冻结 / 解冻 / 停用」全生命周期状态机，所有操作留痕可追溯。
         </p>
       </div>
-      <div class="flex items-center gap-3">
+      <div class="flex flex-wrap items-center gap-3">
+        <div class="flex items-center gap-2 rounded-lg border border-ink-700/60 bg-ink-900/50 px-3 py-2">
+          <Shield :size="14" class="text-brand" />
+          <span class="text-xs text-ink-400">当前角色：</span>
+          <span class="text-xs font-semibold text-brand">
+            {{ currentRole === 'supplier' ? '供应商运营' : currentRole === 'reviewer' ? '审核专员' : currentRole === 'risk' ? '风控专员' : currentRole === 'admin' ? '系统管理员' : '未知' }}
+          </span>
+        </div>
+        <div class="flex items-center gap-2 rounded-lg border border-ink-700/60 bg-ink-900/50 px-2 py-1.5">
+          <User :size="13" class="text-ink-400" />
+          <label class="text-xs text-ink-400">切换身份：</label>
+          <select
+            class="bg-transparent text-xs font-mono text-ink-200 outline-none"
+            :value="operator"
+            @change="(e) => onOperatorChange((e.target as HTMLSelectElement).value)"
+          >
+            <option v-for="opt in ROLE_OPTIONS" :key="opt.prefix" :value="opt.prefix" class="bg-ink-900">
+              {{ opt.label }}
+            </option>
+          </select>
+        </div>
         <button class="btn-ghost" :disabled="loading" @click="() => load(true)">
           <RefreshCw :size="16" :class="loading ? 'animate-spin' : ''" />
           刷新

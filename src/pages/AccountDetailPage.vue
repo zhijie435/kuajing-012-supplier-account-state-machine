@@ -175,10 +175,35 @@ watch(id, () => load(true))
 
 <template>
   <div class="mx-auto max-w-7xl px-6 py-8">
-    <button class="mb-5 inline-flex items-center gap-1.5 text-sm text-ink-300 transition-colors hover:text-ink-100" @click="goBack">
-      <ArrowLeft :size="15" />
-      返回列表
-    </button>
+    <div class="mb-5 flex flex-wrap items-center justify-between gap-3">
+      <button class="inline-flex items-center gap-1.5 text-sm text-ink-300 transition-colors hover:text-ink-100" @click="goBack">
+        <ArrowLeft :size="15" />
+        返回列表
+      </button>
+
+      <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2 rounded-lg border border-ink-700/60 bg-ink-900/50 px-3 py-2">
+          <Shield :size="14" class="text-brand" />
+          <span class="text-xs text-ink-400">当前角色：</span>
+          <span class="text-xs font-semibold text-brand">
+            {{ account?.current_role_label ?? (currentRole === 'supplier' ? '供应商运营' : currentRole === 'reviewer' ? '审核专员' : currentRole === 'risk' ? '风控专员' : currentRole === 'admin' ? '系统管理员' : '未知') }}
+          </span>
+        </div>
+        <div class="flex items-center gap-2 rounded-lg border border-ink-700/60 bg-ink-900/50 px-2 py-1.5">
+          <User :size="13" class="text-ink-400" />
+          <label class="text-xs text-ink-400">切换身份：</label>
+          <select
+            class="bg-transparent text-xs font-mono text-ink-200 outline-none"
+            :value="operator"
+            @change="(e) => onOperatorChange((e.target as HTMLSelectElement).value)"
+          >
+            <option v-for="opt in ROLE_OPTIONS" :key="opt.prefix" :value="opt.prefix" class="bg-ink-900">
+              {{ opt.label }}
+            </option>
+          </select>
+        </div>
+      </div>
+    </div>
 
     <div v-if="loading && !account" class="py-24 text-center text-ink-400">加载中…</div>
 
