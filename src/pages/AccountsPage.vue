@@ -1,17 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ChevronRight, Plus, RefreshCw, Search } from 'lucide-vue-next'
-import { api } from '@/api/client'
-import type { Account, AccountStatus } from '@/api/types'
+import type { AccountStatus } from '@/api/types'
 import { STATUS_META, STATUS_ORDER } from '@/lib/statusMeta'
+import { useAccounts } from '@/composables/useAccounts'
 import StatusBadge from '@/components/StatusBadge.vue'
 import CreateAccountDialog from '@/components/CreateAccountDialog.vue'
 
 const router = useRouter()
+const route = useRoute()
 
-const accounts = ref<Account[]>([])
-const loading = ref(false)
+const { accounts, loading, loadList, addAccount, markDirty } = useAccounts()
+
 const keyword = ref('')
 const statusFilter = ref<AccountStatus | 'all'>('all')
 const showCreate = ref(false)
@@ -40,20 +41,31 @@ const filtered = computed(() => {
   return list
 })
 
-async function load() {
-  loading.value = true
-  try {
-    accounts.value = await api.listAccounts()
-  } finally {
-    loading.value = false
-  }
+async function load(force = false) {
+  await loadList(force)
 }
 
 function openDetail(id: number) {
+  markDirty()
   router.push(`/accounts/${id}`)
 }
 
+function onAccountCreated(account: import('@/api/types').Account) {
+  showCreate.value = false
+  addAccount(account)
+}
+
 onMounted(load)
+
+// 路由激活时强制刷新：从详情页返回后，列表自动拉取最新状态
+watch(
+  () => route.name,
+  (name) => {
+    if (name === 'accounts') {
+      load(true)
+    }
+  },
+)
 </script>
 
 <template>
@@ -166,7 +178,7 @@ onMounted(load)
     <CreateAccountDialog
       :open="showCreate"
       @close="showCreate = false"
-      @done="() => { showCreate = false; load() }"
+      @done="onAccountCreated"
     />
   </div>
 </template>

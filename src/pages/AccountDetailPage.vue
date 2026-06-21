@@ -11,9 +11,9 @@ import {
   PowerOff,
   Power,
 } from 'lucide-vue-next'
-import { api } from '@/api/client'
 import type { Account, AccountEvent } from '@/api/types'
 import { statusMeta } from '@/lib/statusMeta'
+import { useAccounts } from '@/composables/useAccounts'
 import StatusBadge from '@/components/StatusBadge.vue'
 import StateMachineDiagram from '@/components/StateMachineDiagram.vue'
 import HistoryTimeline from '@/components/HistoryTimeline.vue'
@@ -21,6 +21,8 @@ import TransitionDialog from '@/components/TransitionDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
+
+const { loadOne, loadHistory, updateAccount, markDirty } = useAccounts()
 
 const account = ref<Account | null>(null)
 const history = ref<import('@/api/types').TransitionLog[]>([])
@@ -47,10 +49,13 @@ const availableList = computed<AccountEvent[]>(() =>
   account.value ? (Object.keys(account.value.available_events) as AccountEvent[]) : [],
 )
 
-async function load() {
+async function load(force = false) {
   loading.value = true
   try {
-    const [acc, hist] = await Promise.all([api.getAccount(id.value), api.getHistory(id.value)])
+    const [acc, hist] = await Promise.all([
+      loadOne(id.value, force),
+      loadHistory(id.value, force),
+    ])
     account.value = acc
     history.value = hist
   } catch (e) {
@@ -67,9 +72,10 @@ function openDialog(event: AccountEvent) {
 
 function onDone(updated: Account) {
   account.value = updated
+  updateAccount(updated)
   dialogOpen.value = false
   toast.value = { ok: true, msg: '操作成功' }
-  api.getHistory(id.value).then((h) => (history.value = h))
+  loadHistory(id.value, true).then((h) => (history.value = h))
   setTimeout(() => (toast.value = null), 2400)
 }
 
@@ -92,13 +98,18 @@ const infoRows = computed(() => {
   ]
 })
 
+function goBack() {
+  markDirty()
+  router.push('/')
+}
+
 onMounted(load)
-watch(id, load)
+watch(id, () => load(true))
 </script>
 
 <template>
   <div class="mx-auto max-w-7xl px-6 py-8">
-    <button class="mb-5 inline-flex items-center gap-1.5 text-sm text-ink-300 transition-colors hover:text-ink-100" @click="router.push('/')">
+    <button class="mb-5 inline-flex items-center gap-1.5 text-sm text-ink-300 transition-colors hover:text-ink-100" @click="goBack">
       <ArrowLeft :size="15" />
       返回列表
     </button>
