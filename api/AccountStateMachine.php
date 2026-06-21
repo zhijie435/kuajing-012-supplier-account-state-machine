@@ -77,19 +77,25 @@ final class AccountStateMachine
         $sm->addEvent(self::E_ROLLBACK_FREEZE,  '回滚冻结');
 
         // —— 结算账户审核主流程 ——
-        $sm->addTransition(self::E_SUBMIT,   self::S_DRAFT,   self::S_PENDING);
+        $sm->addTransition(self::E_SUBMIT,   self::S_DRAFT,   self::S_PENDING, function ($ctx) {
+            if (empty($ctx['account']['account_no'])) {
+                return ['ok' => false, 'message' => '提交审核前必须补全结算银行账号'];
+            }
+            return ['ok' => true, 'message' => 'ok'];
+        });
         $sm->addTransition(self::E_APPROVE,  self::S_PENDING, self::S_ACTIVE, function ($ctx) {
             if (empty($ctx['account']['account_no'])) {
-                return ['ok' => false, 'message' => '审核通过前必须填写结算银行账号'];
+                return ['ok' => false, 'message' => '审核通过前必须确保结算银行账号已填写完整'];
             }
+            // —— 审核与冻结联动校验：如果账户存在有效冻结记录则不允许审核通过
             if (!empty($ctx['account']['frozen_at'])) {
-                // —— 审核与冻结联动校验：如果账户存在冻结记录且处于冻结相关状态则不允许审核通过
+                return ['ok' => false, 'message' => '账户当前存在冻结记录，审核通过前需先解冻或使用「回滚冻结」撤销冻结'];
             }
             return ['ok' => true, 'message' => 'ok'];
         });
         $sm->addTransition(self::E_REJECT,   self::S_PENDING, self::S_REJECTED, function ($ctx) {
             if (empty($ctx['reason'])) {
-                return ['ok' => false, 'message' => '驳回必须填写驳回原因'];
+                return ['ok' => false, 'message' => '审核驳回必须填写驳回原因，以便供应商补正资料'];
             }
             return ['ok' => true, 'message' => 'ok'];
         });
@@ -100,20 +106,20 @@ final class AccountStateMachine
             return ['ok' => true, 'message' => 'ok'];
         });
 
-        // —— 冻结 / 解冻（含审核-冻结联动校验 ——
+        // —— 冻结 / 解冻（含审核-冻结联动校验）——
         $sm->addTransition(self::E_FREEZE,   self::S_ACTIVE, self::S_FROZEN, function ($ctx) {
             if (empty($ctx['reason'])) {
-                return ['ok' => false, 'message' => '冻结必须填写冻结原因'];
+                return ['ok' => false, 'message' => '冻结账户必须填写冻结原因'];
             }
-            // —— 审核与冻结联动校验：待审核状态下不允许直接冻结，需先处理审核流程
+            // —— 审核与冻结联动校验：如果账户存在未处理的待审核提交，提示风险
             if (!empty($ctx['account']['submitted_at']) && empty($ctx['account']['reviewed_at'])) {
-                return ['ok' => true, 'message' => 'ok'];
+                return ['ok' => false, 'message' => '账户正处于待审核流程中，请先完成审核后再执行冻结操作'];
             }
             return ['ok' => true, 'message' => 'ok'];
         });
         $sm->addTransition(self::E_UNFREEZE, self::S_FROZEN, self::S_ACTIVE, function ($ctx) {
             if (empty($ctx['reason'])) {
-                return ['ok' => false, 'message' => '解冻必须填写处理说明'];
+                return ['ok' => false, 'message' => '解冻账户必须填写处理说明'];
             }
             return ['ok' => true, 'message' => 'ok'];
         });
@@ -130,13 +136,13 @@ final class AccountStateMachine
                 return ['ok' => false, 'message' => '回滚审核通过必须填写回滚原因'];
             }
             if (!empty($ctx['account']['frozen_at'])) {
-                return ['ok' => false, 'message' => '账户当前存在冻结记录，回滚前需先解冻'];
+                return ['ok' => false, 'message' => '账户当前存在有效冻结记录，回滚审核通过前需先解冻或回滚冻结'];
             }
             return ['ok' => true, 'message' => 'ok'];
         });
         $sm->addTransition(self::E_ROLLBACK_REJECT,  self::S_REJECTED,   self::S_PENDING, function ($ctx) {
             if (empty($ctx['reason'])) {
-                return ['ok' => false, 'message' => '回滚驳回必须填写回滚原因'];
+                return ['ok' => false, 'message' => '回滚审核驳回必须填写回滚原因'];
             }
             return ['ok' => true, 'message' => 'ok'];
         });

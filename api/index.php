@@ -68,7 +68,8 @@ try {
 
     // GET /accounts/{id} —— 详情
     if ($method === 'GET' && count($segments) === 2 && $segments[0] === 'accounts') {
-        Response::ok($service->get((int)$segments[1]), '账户详情');
+        $operator = $_GET['operator'] ?? null;
+        Response::ok($service->get((int)$segments[1], is_string($operator) ? $operator : null), '账户详情');
     }
 
     Response::fail('Not Found: ' . $method . ' ' . $uri, 404);

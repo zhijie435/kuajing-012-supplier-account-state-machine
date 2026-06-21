@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { AlertTriangle, CheckCircle2, Lock, Unlock, Send, XCircle, Info, Undo2, RotateCcw, RefreshCw } from 'lucide-vue-next'
+import { AlertTriangle, CheckCircle2, Lock, Unlock, Send, XCircle, Info, Undo2, RotateCcw, RefreshCw, ShieldAlert } from 'lucide-vue-next'
 import { api } from '@/api/client'
-import type { Account, AccountEvent, ApiError, ErrorContext } from '@/api/types'
+import type { Account, AccountEvent, ApiError, ErrorContext, TransitionContext, PermissionContext } from '@/api/types'
 import { statusMeta } from '@/lib/statusMeta'
+import { useAccounts } from '@/composables/useAccounts'
 import BaseModal from './BaseModal.vue'
 
 const props = defineProps<{
@@ -18,6 +19,8 @@ const emit = defineEmits<{
   error: [message: string]
   rollback: [event: AccountEvent]
 }>()
+
+const { operator } = useAccounts()
 
 interface EventUi {
   title: string
@@ -41,6 +44,7 @@ const EVENT_UI: Partial<Record<AccountEvent, EventUi>> = {
     confirmLabel: '提交审核',
     tone: 'primary',
     icon: Send,
+    tips: '提交审核前必须补全结算银行账号',
   },
   approve: {
     title: '审核通过',
@@ -51,14 +55,14 @@ const EVENT_UI: Partial<Record<AccountEvent, EventUi>> = {
     confirmLabel: '确认通过',
     tone: 'primary',
     icon: CheckCircle2,
-    tips: '审核通过前必须确保结算银行账号已填写完整',
+    tips: '审核通过前必须确保结算银行账号已填写完整，且账户无有效冻结记录',
   },
   reject: {
     title: '审核驳回',
     subtitle: '驳回后账户回到「已驳回」，供应商可补正后重新提交',
     reasonRequired: true,
     reasonLabel: '驳回原因（必填）',
-    reasonPlaceholder: '请说明驳回的具体原因，以便供应商补正',
+    reasonPlaceholder: '请说明驳回的具体原因，以便供应商补正资料',
     confirmLabel: '确认驳回',
     tone: 'danger',
     icon: AlertTriangle,
@@ -83,6 +87,7 @@ const EVENT_UI: Partial<Record<AccountEvent, EventUi>> = {
     confirmLabel: '冻结账户',
     tone: 'danger',
     icon: Lock,
+    tips: '冻结前请先处理进行中的审核流程',
   },
   unfreeze: {
     title: '解冻结算账户',
@@ -134,7 +139,7 @@ const EVENT_UI: Partial<Record<AccountEvent, EventUi>> = {
     confirmLabel: '确认回滚',
     tone: 'danger',
     icon: RotateCcw,
-    tips: '回滚前需确保账户当前无冻结记录',
+    tips: '回滚前需确保账户当前无有效冻结记录，请先解冻或回滚冻结',
   },
   rollback_reject: {
     title: '回滚审核驳回',
@@ -167,8 +172,14 @@ const ROLLBACK_LABEL: Partial<Record<AccountEvent, string>> = {
   rollback_freeze: '回滚冻结',
 }
 
+const ROLE_LABEL: Record<string, string> = {
+  supplier: '供应商运营',
+  reviewer: '审核专员',
+  risk: '风控专员',
+  admin: '系统管理员',
+}
+
 const reason = ref('')
-const operator = ref('ops-admin')
 const submitting = ref(false)
 const errorMsg = ref('')
 const errorContext = ref<ErrorContext | null>(null)
@@ -181,11 +192,41 @@ const currentMeta = computed(() =>
   props.account ? statusMeta(props.account.status) : null,
 )
 
-const canRetry = computed(() => errorContext.value?.retryable ?? false)
-const canRollback = computed(() => errorContext.value?.can_rollback && errorContext.value?.rollback_event)
+const isPermissionError = computed(() => {
+  if (!errorContext.value) return false
+  return 'error_type' in errorContext.value && errorContext.value.error_type === 'permission'
+})
+
+const transitionCtx = computed<TransitionContext | null>(() => {
+  if (errorContext.value && 'error_type' in errorContext.value && errorContext.value.error_type === 'transition') {
+    return errorContext.value as TransitionContext
+  }
+  return null
+})
+
+const permissionCtx = computed<PermissionContext | null>(() => {
+  if (errorContext.value && 'error_type' in errorContext.value && errorContext.value.error_type === 'permission') {
+    return errorContext.value as PermissionContext
+  }
+  return null
+})
+
+const canRetry = computed(() => transitionCtx.value?.retryable ?? false)
+const canRollback = computed(() => !!(transitionCtx.value?.can_rollback && transitionCtx.value?.rollback_event))
 const rollbackEventLabel = computed(() => {
-  if (!errorContext.value?.rollback_event) return ''
-  return ROLLBACK_LABEL[errorContext.value.rollback_event] ?? '回滚'
+  const ev = transitionCtx.value?.rollback_event
+  return ev ? (ROLLBACK_LABEL[ev] ?? '回滚') : ''
+})
+
+const requiredRolesLabel = computed(() => {
+  if (!permissionCtx.value?.required_role) return ''
+  const roles = permissionCtx.value.required_role.split(',')
+  return roles.map(r => ROLE_LABEL[r] ?? r).join('、')
+})
+
+const currentRoleLabel = computed(() => {
+  if (!permissionCtx.value?.current_role) return ''
+  return ROLE_LABEL[permissionCtx.value.current_role] ?? permissionCtx.value.current_role
 })
 
 watch(
@@ -233,8 +274,9 @@ async function submit() {
 }
 
 function triggerRollback() {
-  if (errorContext.value?.rollback_event) {
-    emit('rollback', errorContext.value.rollback_event)
+  const ev = transitionCtx.value?.rollback_event
+  if (ev) {
+    emit('rollback', ev)
   }
 }
 
@@ -273,7 +315,7 @@ const confirmClass = computed(() => {
       </div>
 
       <div
-        v-if="errorMsg"
+        v-if="errorMsg && !isPermissionError"
         class="flex items-start gap-3 rounded-xl border border-state-rejected/40 bg-state-rejected/10 px-4 py-3 shadow-lg shadow-state-rejected/5"
       >
         <XCircle :size="18" class="mt-0.5 flex-shrink-0 text-state-rejected" />
@@ -301,6 +343,28 @@ const confirmClass = computed(() => {
           </div>
           <p v-if="canRollback" class="mt-2 text-xs text-ink-400">
             提示：您可以选择回滚本次操作，将账户恢复到之前的状态
+          </p>
+        </div>
+      </div>
+
+      <div
+        v-if="errorMsg && isPermissionError"
+        class="flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 shadow-lg shadow-amber-500/5"
+      >
+        <ShieldAlert :size="18" class="mt-0.5 flex-shrink-0 text-amber-500" />
+        <div class="min-w-0 flex-1">
+          <p class="text-sm font-semibold text-amber-500">权限不足</p>
+          <p class="mt-0.5 text-sm text-ink-200">{{ errorMsg }}</p>
+          <div v-if="currentRoleLabel || requiredRolesLabel" class="mt-3 space-y-1">
+            <p v-if="currentRoleLabel" class="text-xs text-ink-300">
+              当前身份：<span class="font-mono text-amber-400">{{ currentRoleLabel }}</span>
+            </p>
+            <p v-if="requiredRolesLabel" class="text-xs text-ink-300">
+              所需角色：<span class="font-mono text-amber-400">{{ requiredRolesLabel }}</span>
+            </p>
+          </div>
+          <p class="mt-2 text-xs text-ink-400">
+            提示：请使用具有相应权限的操作人账号（账号前缀需与角色匹配）
           </p>
         </div>
       </div>

@@ -20,6 +20,52 @@ export type AccountEvent =
   | 'rollback_reject'
   | 'rollback_freeze'
 
+export type AccountRole = 'supplier' | 'reviewer' | 'risk' | 'admin'
+
+export interface RoleMeta {
+  key: AccountRole
+  label: string
+}
+
+export interface PermissionContext {
+  required_role: string
+  current_role: string
+  error_type: 'permission'
+}
+
+export interface TransitionContext {
+  current_status: string
+  event: string
+  rollback_event: AccountEvent | null
+  can_rollback: boolean
+  retryable: boolean
+  error_type: 'transition'
+}
+
+export type ErrorContext = PermissionContext | TransitionContext
+
+export interface StateMeta {
+  key: string
+  label: string
+  group: string
+  terminal: boolean
+}
+
+export interface Edge {
+  event: AccountEvent
+  event_label: string
+  from: AccountStatus
+  to: AccountStatus
+}
+
+export interface StateMachineDefinition {
+  states: Record<string, StateMeta>
+  events: Record<string, string>
+  edges: Edge[]
+  roles: RoleMeta[]
+  event_permissions: Partial<Record<AccountEvent, AccountRole[]>>
+}
+
 export interface Account {
   id: number
   supplier_code: string
@@ -45,26 +91,8 @@ export interface Account {
   frozen_at_text: string | null
   account_no_masked: string
   available_events: Partial<Record<AccountEvent, string>>
-}
-
-export interface StateMeta {
-  key: string
-  label: string
-  group: string
-  terminal: boolean
-}
-
-export interface Edge {
-  event: AccountEvent
-  event_label: string
-  from: AccountStatus
-  to: AccountStatus
-}
-
-export interface StateMachineDefinition {
-  states: Record<string, StateMeta>
-  events: Record<string, string>
-  edges: Edge[]
+  current_role?: AccountRole
+  current_role_label?: string
 }
 
 export interface TransitionLog {
@@ -83,14 +111,6 @@ export interface TransitionLog {
   created_at_text: string
 }
 
-export interface ErrorContext {
-  current_status: string
-  event: string
-  rollback_event: AccountEvent | null
-  can_rollback: boolean
-  retryable: boolean
-}
-
 export interface ApiResult<T> {
   code: number
   message: string
@@ -105,5 +125,13 @@ export class ApiError extends Error {
   ) {
     super(message)
     this.name = 'ApiError'
+  }
+
+  get isPermissionError(): boolean {
+    return this.context?.error_type === 'permission' || this.status === 403
+  }
+
+  get isTransitionError(): boolean {
+    return this.context?.error_type === 'transition' || (this.status >= 400 && this.status < 500 && this.status !== 403)
   }
 }

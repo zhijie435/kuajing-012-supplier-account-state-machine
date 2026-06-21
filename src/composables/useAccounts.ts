@@ -1,6 +1,23 @@
 import { ref, shallowRef } from 'vue'
 import { api } from '@/api/client'
-import type { Account, TransitionLog } from '@/api/types'
+import type { Account, TransitionLog, AccountRole } from '@/api/types'
+
+/**
+ * 操作人全局配置（单例）
+ * 生产环境应从登录态获取，此处提供切换入口模拟不同角色
+ */
+const operator = ref<string>('admin_root')
+
+function deriveRole(op: string): AccountRole | null {
+  const s = op.toLowerCase()
+  if (s.startsWith('supplier_') || s.startsWith('sup_')) return 'supplier'
+  if (s.startsWith('reviewer_') || s.startsWith('rev_')) return 'reviewer'
+  if (s.startsWith('risk_') || s.startsWith('rsk_')) return 'risk'
+  if (s.startsWith('admin_') || s.startsWith('adm_') || s === 'ops-admin') return 'admin'
+  return null
+}
+
+const currentRole = ref<AccountRole | null>(deriveRole(operator.value))
 
 /**
  * 供应商账户共享状态存储（单例）
@@ -21,12 +38,18 @@ const lastFilterKey = ref('')
 let loadPromise: Promise<Account[]> | null = null
 
 export function useAccounts() {
+  function setOperator(op: string): void {
+    operator.value = op
+    currentRole.value = deriveRole(op)
+    clearCache()
+  }
+
   async function loadList(
     params: { status?: string; keyword?: string } = {},
     force = false,
   ): Promise<Account[]> {
     const now = Date.now()
-    const filterKey = `${params.status ?? 'all'}::${params.keyword ?? ''}`
+    const filterKey = `${operator.value}::${params.status ?? 'all'}::${params.keyword ?? ''}`
     if (!force && loadPromise) return loadPromise
     // 缓存策略：筛选条件变化 或 标记脏数据 或 超过缓存时限，才重新拉取
     if (!force && accounts.value.length > 0 && now - lastLoadAt.value < 30000 && lastFilterKey.value === filterKey) {
@@ -36,7 +59,7 @@ export function useAccounts() {
     loading.value = true
     lastFilterKey.value = filterKey
     loadPromise = api
-      .listAccounts(params)
+      .listAccounts({ ...params, operator: operator.value })
       .then((list) => {
         accounts.value = list
         lastLoadAt.value = now
@@ -54,7 +77,7 @@ export function useAccounts() {
     if (!force && accountCache.has(id)) {
       return accountCache.get(id)!
     }
-    const acc = await api.getAccount(id)
+    const acc = await api.getAccount(id, operator.value)
     accountCache.set(id, acc)
     syncListEntry(acc)
     return acc
@@ -108,6 +131,9 @@ export function useAccounts() {
   return {
     accounts,
     loading,
+    operator,
+    currentRole,
+    setOperator,
     loadList,
     loadOne,
     loadHistory,

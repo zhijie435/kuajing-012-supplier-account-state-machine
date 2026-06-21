@@ -13,6 +13,8 @@ import {
   Undo2,
   RotateCcw,
   Info,
+  User,
+  Shield,
 } from 'lucide-vue-next'
 import type { Account, AccountEvent } from '@/api/types'
 import { statusMeta } from '@/lib/statusMeta'
@@ -25,7 +27,19 @@ import TransitionDialog from '@/components/TransitionDialog.vue'
 const route = useRoute()
 const router = useRouter()
 
-const { loadOne, loadHistory, updateAccount, markDirty, clearCache } = useAccounts()
+const { loadOne, loadHistory, updateAccount, markDirty, clearCache, operator, currentRole, setOperator } = useAccounts()
+
+const ROLE_OPTIONS = [
+  { prefix: 'admin_root', label: '系统管理员 (admin_)', role: '系统管理员' as const },
+  { prefix: 'reviewer_01', label: '审核专员 (reviewer_)', role: '审核专员' as const },
+  { prefix: 'supplier_01', label: '供应商运营 (supplier_)', role: '供应商运营' as const },
+  { prefix: 'risk_01', label: '风控专员 (risk_)', role: '风控专员' as const },
+]
+
+function onOperatorChange(prefix: string) {
+  setOperator(prefix)
+  load(true)
+}
 
 const account = ref<Account | null>(null)
 const history = ref<import('@/api/types').TransitionLog[]>([])

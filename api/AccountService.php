@@ -453,11 +453,27 @@ final class AccountService
 
     // —— 内部工具 ——
 
-    private function decorate(array $row): array
+    private function decorate(array $row, ?string $role = null): array
     {
         $status = (string)$row['status'];
         $row['status_label'] = $this->fsm->engine()->stateLabel($status);
-        $row['available_events'] = $this->fsm->engine()->eventsFrom($status);
+        $allEvents = $this->fsm->engine()->eventsFrom($status);
+        if ($role !== null) {
+            $filtered = [];
+            foreach ($allEvents as $evKey => $evLabel) {
+                $allowed = $this->eventPermissions[$evKey] ?? [];
+                if (in_array($role, $allowed, true)) {
+                    $filtered[$evKey] = $evLabel;
+                }
+            }
+            $row['available_events'] = $filtered;
+        } else {
+            $row['available_events'] = $allEvents;
+        }
+        if ($role !== null) {
+            $row['current_role'] = $role;
+            $row['current_role_label'] = AccountRole::LABELS[$role] ?? $role;
+        }
         foreach (['created_at', 'updated_at', 'submitted_at', 'reviewed_at', 'frozen_at'] as $f) {
             $row[$f . '_text'] = $row[$f] ? date('Y-m-d H:i:s', (int)$row[$f]) : null;
         }
