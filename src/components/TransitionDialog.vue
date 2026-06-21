@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { AlertTriangle, CheckCircle2, Lock, Unlock, Send } from 'lucide-vue-next'
+import { computed, ref, watch, nextTick } from 'vue'
+import { AlertTriangle, CheckCircle2, Lock, Unlock, Send, XCircle, Info } from 'lucide-vue-next'
 import { api } from '@/api/client'
 import type { Account, AccountEvent } from '@/api/types'
 import { statusMeta } from '@/lib/statusMeta'
@@ -15,6 +15,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   close: []
   done: [account: Account]
+  error: [message: string]
 }>()
 
 interface EventUi {
@@ -26,6 +27,7 @@ interface EventUi {
   confirmLabel: string
   tone: 'primary' | 'danger' | 'ghost'
   icon: typeof Lock
+  tips?: string
 }
 
 const EVENT_UI: Partial<Record<AccountEvent, EventUi>> = {
@@ -48,6 +50,7 @@ const EVENT_UI: Partial<Record<AccountEvent, EventUi>> = {
     confirmLabel: '确认通过',
     tone: 'primary',
     icon: CheckCircle2,
+    tips: '审核通过前必须确保结算银行账号已填写完整',
   },
   reject: {
     title: '审核驳回',
@@ -68,6 +71,7 @@ const EVENT_UI: Partial<Record<AccountEvent, EventUi>> = {
     confirmLabel: '重新提交',
     tone: 'primary',
     icon: Send,
+    tips: '重新提交前必须补全结算银行账号',
   },
   freeze: {
     title: '冻结结算账户',
@@ -154,7 +158,9 @@ async function submit() {
     })
     emit('done', updated)
   } catch (e) {
-    errorMsg.value = (e as Error).message
+    const msg = (e as Error).message || '操作失败'
+    errorMsg.value = msg
+    emit('error', msg)
   } finally {
     submitting.value = false
   }
@@ -194,6 +200,25 @@ const confirmClass = computed(() => {
         </div>
       </div>
 
+      <div
+        v-if="errorMsg"
+        class="flex items-start gap-3 rounded-xl border border-state-rejected/40 bg-state-rejected/10 px-4 py-3 shadow-lg shadow-state-rejected/5"
+      >
+        <XCircle :size="18" class="mt-0.5 flex-shrink-0 text-state-rejected" />
+        <div class="min-w-0">
+          <p class="text-sm font-semibold text-state-rejected">操作失败</p>
+          <p class="mt-0.5 text-sm text-ink-200">{{ errorMsg }}</p>
+        </div>
+      </div>
+
+      <div
+        v-if="ui?.tips && !errorMsg"
+        class="flex items-start gap-3 rounded-xl border border-brand/30 bg-brand/5 px-4 py-3"
+      >
+        <Info :size="16" class="mt-0.5 flex-shrink-0 text-brand" />
+        <p class="text-sm text-ink-200">{{ ui.tips }}</p>
+      </div>
+
       <div>
         <label class="label">{{ ui?.reasonLabel }}</label>
         <textarea
@@ -210,10 +235,6 @@ const confirmClass = computed(() => {
           <input v-model="operator" class="input font-mono" />
         </div>
       </div>
-
-      <p v-if="errorMsg" class="rounded-lg border border-state-rejected/30 bg-state-rejected/10 px-3 py-2 text-sm text-state-rejected">
-        {{ errorMsg }}
-      </p>
     </div>
 
     <template #footer>

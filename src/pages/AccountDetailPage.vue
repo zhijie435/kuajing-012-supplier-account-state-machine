@@ -79,6 +79,11 @@ function onDone(updated: Account) {
   setTimeout(() => (toast.value = null), 2400)
 }
 
+function onError(msg: string) {
+  toast.value = { ok: false, msg }
+  setTimeout(() => (toast.value = null), 3200)
+}
+
 function btnClass(tone: 'primary' | 'danger' | 'ghost') {
   return tone === 'danger' ? 'btn-danger' : tone === 'ghost' ? 'btn-ghost' : 'btn-primary'
 }
@@ -197,6 +202,7 @@ watch(id, () => load(true))
       :event="dialogEvent"
       @close="dialogOpen = false"
       @done="onDone"
+      @error="onError"
     />
 
     <!-- toast -->

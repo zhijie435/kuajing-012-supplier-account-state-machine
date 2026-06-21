@@ -78,7 +78,10 @@ final class StateMachine
             if ($guard !== null) {
                 $result = $guard($context);
                 if (!is_array($result) || ($result['ok'] ?? false) === false) {
-                    return ['ok' => false, 'message' => $result['message'] ?? '守卫校验未通过', 'to' => null];
+                    $msg = is_array($result) && isset($result['message']) && is_string($result['message'])
+                        ? $result['message']
+                        : '守卫校验未通过';
+                    return ['ok' => false, 'message' => $msg, 'to' => null];
                 }
             }
             return ['ok' => true, 'message' => 'ok', 'to' => $rule['to']];
