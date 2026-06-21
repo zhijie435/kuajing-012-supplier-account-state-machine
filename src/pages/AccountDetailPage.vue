@@ -12,6 +12,7 @@ import {
   Power,
   Undo2,
   RotateCcw,
+  Info,
 } from 'lucide-vue-next'
 import type { Account, AccountEvent } from '@/api/types'
 import { statusMeta } from '@/lib/statusMeta'
@@ -35,6 +36,36 @@ const toast = ref<{ ok: boolean; msg: string } | null>(null)
 
 const id = computed(() => Number(route.params.id))
 const meta = computed(() => (account.value ? statusMeta(account.value.status) : null))
+
+const linkageWarning = computed(() => {
+  if (!account.value) return null
+  const a = account.value
+  // 联动校验 1：已冻结状态下不允许审核相关操作，提示
+  if (a.status === 'frozen') {
+    return {
+      level: 'warn' as const,
+      title: '账户已冻结',
+      message: '当前账户处于冻结状态，审核相关操作已被联动拦截。如需审核，请先解冻或使用「回滚冻结」撤销冻结。',
+    }
+  }
+  // 联动校验 2：回滚审核通过需确保无冻结
+  if (a.status === 'active' && a.frozen_at) {
+    return {
+      level: 'warn' as const,
+      title: '存在冻结历史记录',
+      message: '该账户曾被冻结，回滚审核通过前需确保当前无有效冻结记录。',
+    }
+  }
+  // 联动校验 3：待审核状态下冻结风险提示
+  if (a.status === 'pending_review') {
+    return {
+      level: 'info' as const,
+      title: '审核流程进行中',
+      message: '账户正处于待审核状态，审核完成后才能进行冻结/解冻操作。',
+    }
+  }
+  return null
+})
 
 const EVENT_BTN: Partial<Record<AccountEvent, { icon: typeof Lock; tone: 'primary' | 'danger' | 'ghost' }>> = {
   submit: { icon: Send, tone: 'primary' },
@@ -170,6 +201,34 @@ watch(id, () => load(true))
         <!-- 账户信息 -->
         <section class="panel lg:col-span-2 p-6">
           <h2 class="mb-4 font-display text-lg font-semibold text-ink-50">账户信息</h2>
+
+          <!-- 审核-冻结联动校验提示 -->
+          <div
+            v-if="linkageWarning"
+            class="mb-4 flex items-start gap-3 rounded-xl border px-4 py-3"
+            :class="
+              linkageWarning.level === 'warn'
+                ? 'border-state-frozen/40 bg-state-frozen/10'
+                : 'border-brand/30 bg-brand/5'
+            "
+          >
+            <component
+              :is="linkageWarning.level === 'warn' ? AlertTriangle : Info"
+              :size="16"
+              class="mt-0.5 flex-shrink-0"
+              :class="linkageWarning.level === 'warn' ? 'text-state-frozen' : 'text-brand'"
+            />
+            <div class="min-w-0">
+              <p
+                class="text-sm font-semibold"
+                :class="linkageWarning.level === 'warn' ? 'text-state-frozen' : 'text-brand'"
+              >
+                {{ linkageWarning.title }}
+              </p>
+              <p class="mt-0.5 text-sm text-ink-200">{{ linkageWarning.message }}</p>
+            </div>
+          </div>
+
           <dl class="space-y-3">
             <div v-for="row in infoRows" :key="row.label" class="flex items-baseline justify-between gap-4 border-b border-ink-800/60 pb-2.5">
               <dt class="text-xs text-ink-400">{{ row.label }}</dt>
