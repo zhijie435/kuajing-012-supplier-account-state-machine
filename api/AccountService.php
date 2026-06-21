@@ -157,6 +157,23 @@ final class AccountService
             case AccountStateMachine::E_DISABLE:
             case AccountStateMachine::E_ENABLE:
                 break;
+            // —— 回滚入口：字段回滚处理 ——
+            case AccountStateMachine::E_ROLLBACK_SUBMIT:
+                $patch['submitted_at'] = null;
+                $patch['review_reason'] = null;
+                break;
+            case AccountStateMachine::E_ROLLBACK_APPROVE:
+                $patch['reviewed_at'] = null;
+                $patch['review_reason'] = $context['reason'];
+                break;
+            case AccountStateMachine::E_ROLLBACK_REJECT:
+                $patch['reviewed_at'] = null;
+                $patch['review_reason'] = null;
+                break;
+            case AccountStateMachine::E_ROLLBACK_FREEZE:
+                $patch['frozen_at'] = null;
+                $patch['freeze_reason'] = $context['reason'];
+                break;
         }
 
         $set = implode(', ', array_map(fn($k) => "$k = :$k", array_keys($patch)));
@@ -260,6 +277,10 @@ final class AccountService
             'unfreeze' => '解冻账户',
             'disable' => '停用账户',
             'enable' => '重新启用',
+            'rollback_submit' => '回滚提交',
+            'rollback_approve' => '回滚审核通过',
+            'rollback_reject' => '回滚审核驳回',
+            'rollback_freeze' => '回滚冻结',
         ];
         return $map[$event] ?? $event;
     }

@@ -2,9 +2,10 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ChevronRight, Plus, RefreshCw, Search } from 'lucide-vue-next'
-import type { AccountStatus } from '@/api/types'
+import type { Account, AccountStatus } from '@/api/types'
 import { STATUS_META, STATUS_ORDER } from '@/lib/statusMeta'
 import { useAccounts } from '@/composables/useAccounts'
+import { api } from '@/api/client'
 import StatusBadge from '@/components/StatusBadge.vue'
 import CreateAccountDialog from '@/components/CreateAccountDialog.vue'
 
@@ -16,33 +17,41 @@ const { accounts, loading, loadList, addAccount, markDirty } = useAccounts()
 const keyword = ref('')
 const statusFilter = ref<AccountStatus | 'all'>('all')
 const showCreate = ref(false)
+const countsLoading = ref(false)
+const allAccounts = ref<Account[]>([])
+
+async function loadCounts(force = false) {
+  countsLoading.value = true
+  try {
+    allAccounts.value = await api.listAccounts()
+  } finally {
+    countsLoading.value = false
+  }
+}
 
 const counts = computed(() => {
-  const c: Record<string, number> = { all: accounts.value.length }
+  const c: Record<string, number> = { all: allAccounts.value.length }
   for (const s of STATUS_ORDER) c[s] = 0
-  for (const a of accounts.value) c[a.status] = (c[a.status] ?? 0) + 1
+  for (const a of allAccounts.value) c[a.status] = (c[a.status] ?? 0) + 1
   return c
 })
 
-const filtered = computed(() => {
-  let list = accounts.value
-  if (statusFilter.value !== 'all') {
-    list = list.filter((a) => a.status === statusFilter.value)
-  }
-  const kw = keyword.value.trim()
-  if (kw) {
-    list = list.filter(
-      (a) =>
-        a.supplier_name.includes(kw) ||
-        a.supplier_code.includes(kw) ||
-        a.account_no.includes(kw),
-    )
-  }
-  return list
-})
+const filtered = computed(() => accounts.value)
+
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleLoad() {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    load()
+  }, 200)
+}
 
 async function load(force = false) {
-  await loadList(force)
+  const params: { status?: string; keyword?: string } = {}
+  if (statusFilter.value !== 'all') params.status = statusFilter.value
+  if (keyword.value.trim()) params.keyword = keyword.value.trim()
+  await loadList(params, force)
+  await loadCounts(force)
 }
 
 function openDetail(id: number) {
@@ -53,11 +62,11 @@ function openDetail(id: number) {
 function onAccountCreated(account: import('@/api/types').Account) {
   showCreate.value = false
   addAccount(account)
+  allAccounts.value = [account, ...allAccounts.value]
 }
 
 onMounted(load)
 
-// 路由激活时强制刷新：从详情页返回后，列表自动拉取最新状态
 watch(
   () => route.name,
   (name) => {
@@ -66,6 +75,9 @@ watch(
     }
   },
 )
+
+watch(statusFilter, () => load())
+watch(keyword, () => scheduleLoad())
 </script>
 
 <template>
@@ -81,7 +93,7 @@ watch(
         </p>
       </div>
       <div class="flex items-center gap-3">
-        <button class="btn-ghost" :disabled="loading" @click="load">
+        <button class="btn-ghost" :disabled="loading" @click="() => load(true)">
           <RefreshCw :size="16" :class="loading ? 'animate-spin' : ''" />
           刷新
         </button>
@@ -168,8 +180,11 @@ watch(
               </span>
             </td>
           </tr>
-          <tr v-if="filtered.length === 0">
+          <tr v-if="filtered.length === 0 && !loading">
             <td colspan="6" class="px-5 py-12 text-center text-ink-400">没有匹配的账户</td>
+          </tr>
+          <tr v-if="loading && filtered.length === 0">
+            <td colspan="6" class="px-5 py-12 text-center text-ink-400">加载中…</td>
           </tr>
         </tbody>
       </table>

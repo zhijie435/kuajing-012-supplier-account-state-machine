@@ -10,6 +10,8 @@ import {
   Send,
   PowerOff,
   Power,
+  Undo2,
+  RotateCcw,
 } from 'lucide-vue-next'
 import type { Account, AccountEvent } from '@/api/types'
 import { statusMeta } from '@/lib/statusMeta'
@@ -43,6 +45,10 @@ const EVENT_BTN: Partial<Record<AccountEvent, { icon: typeof Lock; tone: 'primar
   unfreeze: { icon: Unlock, tone: 'primary' },
   disable: { icon: PowerOff, tone: 'danger' },
   enable: { icon: Power, tone: 'ghost' },
+  rollback_submit: { icon: Undo2, tone: 'ghost' },
+  rollback_approve: { icon: RotateCcw, tone: 'danger' },
+  rollback_reject: { icon: Undo2, tone: 'ghost' },
+  rollback_freeze: { icon: RotateCcw, tone: 'primary' },
 }
 
 const availableList = computed<AccountEvent[]>(() =>

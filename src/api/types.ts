@@ -15,6 +15,10 @@ export type AccountEvent =
   | 'unfreeze'
   | 'disable'
   | 'enable'
+  | 'rollback_submit'
+  | 'rollback_approve'
+  | 'rollback_reject'
+  | 'rollback_freeze'
 
 export interface Account {
   id: number

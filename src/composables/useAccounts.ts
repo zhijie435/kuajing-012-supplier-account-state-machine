@@ -16,20 +16,27 @@ const accountCache = new Map<number, Account>()
 const historyCache = new Map<number, TransitionLog[]>()
 const loading = ref(false)
 const lastLoadAt = ref(0)
+const lastFilterKey = ref('')
 
 let loadPromise: Promise<Account[]> | null = null
 
 export function useAccounts() {
-  async function loadList(force = false): Promise<Account[]> {
+  async function loadList(
+    params: { status?: string; keyword?: string } = {},
+    force = false,
+  ): Promise<Account[]> {
     const now = Date.now()
+    const filterKey = `${params.status ?? 'all'}::${params.keyword ?? ''}`
     if (!force && loadPromise) return loadPromise
-    if (!force && accounts.value.length > 0 && now - lastLoadAt.value < 1000) {
+    // 缓存策略：筛选条件变化 或 标记脏数据 或 超过缓存时限，才重新拉取
+    if (!force && accounts.value.length > 0 && now - lastLoadAt.value < 30000 && lastFilterKey.value === filterKey) {
       return accounts.value
     }
 
     loading.value = true
+    lastFilterKey.value = filterKey
     loadPromise = api
-      .listAccounts()
+      .listAccounts(params)
       .then((list) => {
         accounts.value = list
         lastLoadAt.value = now

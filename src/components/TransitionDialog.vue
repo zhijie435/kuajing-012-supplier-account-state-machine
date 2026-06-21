@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch, nextTick } from 'vue'
-import { AlertTriangle, CheckCircle2, Lock, Unlock, Send, XCircle, Info } from 'lucide-vue-next'
+import { AlertTriangle, CheckCircle2, Lock, Unlock, Send, XCircle, Info, Undo2, RotateCcw } from 'lucide-vue-next'
 import { api } from '@/api/client'
 import type { Account, AccountEvent } from '@/api/types'
 import { statusMeta } from '@/lib/statusMeta'
@@ -112,6 +112,50 @@ const EVENT_UI: Partial<Record<AccountEvent, EventUi>> = {
     confirmLabel: '重新启用',
     tone: 'ghost',
     icon: Unlock,
+  },
+  rollback_submit: {
+    title: '回滚提交',
+    subtitle: '将账户从「待审核」回退到「待提交」状态',
+    reasonRequired: true,
+    reasonLabel: '回滚原因（必填）',
+    reasonPlaceholder: '请说明撤回提交的具体原因',
+    confirmLabel: '确认回滚',
+    tone: 'ghost',
+    icon: Undo2,
+    tips: '回滚后账户恢复为草稿状态，需重新提交审核',
+  },
+  rollback_approve: {
+    title: '回滚审核通过',
+    subtitle: '将账户从「正常」回退到「待审核」重新复核',
+    reasonRequired: true,
+    reasonLabel: '回滚原因（必填）',
+    reasonPlaceholder: '请说明回滚审核通过的具体原因',
+    confirmLabel: '确认回滚',
+    tone: 'danger',
+    icon: RotateCcw,
+    tips: '回滚前需确保账户当前无冻结记录',
+  },
+  rollback_reject: {
+    title: '回滚审核驳回',
+    subtitle: '将账户从「已驳回」回退到「待审核」重新处理',
+    reasonRequired: true,
+    reasonLabel: '回滚原因（必填）',
+    reasonPlaceholder: '请说明撤销驳回的原因',
+    confirmLabel: '确认回滚',
+    tone: 'ghost',
+    icon: Undo2,
+    tips: '回滚后驳回记录保留，账户回到待审核状态',
+  },
+  rollback_freeze: {
+    title: '回滚冻结',
+    subtitle: '将账户从「已冻结」回退到「正常」状态（撤销冻结）',
+    reasonRequired: true,
+    reasonLabel: '回滚原因（必填）',
+    reasonPlaceholder: '请说明撤销冻结的原因',
+    confirmLabel: '确认回滚',
+    tone: 'primary',
+    icon: RotateCcw,
+    tips: '回滚冻结不同于解冻，冻结操作历史会被标记为已回滚',
   },
 }
 
