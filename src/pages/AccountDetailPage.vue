@@ -25,7 +25,7 @@ import TransitionDialog from '@/components/TransitionDialog.vue'
 const route = useRoute()
 const router = useRouter()
 
-const { loadOne, loadHistory, updateAccount, markDirty } = useAccounts()
+const { loadOne, loadHistory, updateAccount, markDirty, clearCache } = useAccounts()
 
 const account = ref<Account | null>(null)
 const history = ref<import('@/api/types').TransitionLog[]>([])
@@ -111,14 +111,24 @@ function onDone(updated: Account) {
   account.value = updated
   updateAccount(updated)
   dialogOpen.value = false
+  dialogEvent.value = null
   toast.value = { ok: true, msg: '操作成功' }
-  loadHistory(id.value, true).then((h) => (history.value = h))
+  clearCache()
+  markDirty()
+  Promise.all([loadOne(id.value, true), loadHistory(id.value, true)]).then(([acc, hist]) => {
+    account.value = acc
+    history.value = hist
+  })
   setTimeout(() => (toast.value = null), 2400)
 }
 
 function onError(msg: string) {
   toast.value = { ok: false, msg }
   setTimeout(() => (toast.value = null), 3200)
+}
+
+function onRollback(rollbackEvent: AccountEvent) {
+  dialogEvent.value = rollbackEvent
 }
 
 function btnClass(tone: 'primary' | 'danger' | 'ghost') {
@@ -268,6 +278,7 @@ watch(id, () => load(true))
       @close="dialogOpen = false"
       @done="onDone"
       @error="onError"
+      @rollback="onRollback"
     />
 
     <!-- toast -->

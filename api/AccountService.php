@@ -29,6 +29,29 @@ class StateException extends RuntimeException
 }
 
 /**
+ * 权限不足异常：当操作人角色无权执行指定操作时抛出（HTTP 403）。
+ */
+final class PermissionDeniedException extends StateException
+{
+    public function __construct(
+        string $message,
+        private string $requiredRole = '',
+        private string $currentRole = ''
+    ) {
+        parent::__construct($message, 403);
+    }
+
+    public function context(): array
+    {
+        return [
+            'required_role' => $this->requiredRole,
+            'current_role' => $this->currentRole,
+            'error_type' => 'permission',
+        ];
+    }
+}
+
+/**
  * 状态迁移异常：包含更丰富的上下文信息，
  * 用于前端展示回滚提示和重试入口。
  */
@@ -54,7 +77,35 @@ final class StateTransitionException extends StateException
             'rollback_event' => $this->rollbackEvent,
             'can_rollback' => $this->canRollback,
             'retryable' => $this->retryable,
+            'error_type' => 'transition',
         ];
+    }
+}
+
+/**
+ * 操作角色定义：
+ * - supplier    供应商运营：可提交/重新提交审核资料
+ * - reviewer    审核专员：可审核通过/驳回
+ * - risk        风控专员：可冻结/解冻账户
+ * - admin       系统管理员：可停用/启用账户，以及所有回滚操作
+ */
+final class AccountRole
+{
+    public const SUPPLIER = 'supplier';
+    public const REVIEWER = 'reviewer';
+    public const RISK     = 'risk';
+    public const ADMIN    = 'admin';
+
+    public const LABELS = [
+        self::SUPPLIER => '供应商运营',
+        self::REVIEWER => '审核专员',
+        self::RISK     => '风控专员',
+        self::ADMIN    => '系统管理员',
+    ];
+
+    public static function all(): array
+    {
+        return [self::SUPPLIER, self::REVIEWER, self::RISK, self::ADMIN];
     }
 }
 
@@ -67,15 +118,103 @@ final class AccountService
     private AccountStateMachine $fsm;
     private PDO $pdo;
 
+    /** @var array<string, list<string>> 事件 => 允许的角色列表 */
+    private array $eventPermissions;
+
     public function __construct()
     {
         $this->fsm = new AccountStateMachine();
         $this->pdo = Database::pdo();
+
+        $this->eventPermissions = [
+            AccountStateMachine::E_SUBMIT            => [AccountRole::SUPPLIER, AccountRole::ADMIN],
+            AccountStateMachine::E_RESUBMIT          => [AccountRole::SUPPLIER, AccountRole::ADMIN],
+            AccountStateMachine::E_APPROVE           => [AccountRole::REVIEWER, AccountRole::ADMIN],
+            AccountStateMachine::E_REJECT            => [AccountRole::REVIEWER, AccountRole::ADMIN],
+            AccountStateMachine::E_FREEZE            => [AccountRole::RISK, AccountRole::ADMIN],
+            AccountStateMachine::E_UNFREEZE          => [AccountRole::RISK, AccountRole::ADMIN],
+            AccountStateMachine::E_DISABLE           => [AccountRole::ADMIN],
+            AccountStateMachine::E_ENABLE            => [AccountRole::ADMIN],
+            AccountStateMachine::E_ROLLBACK_SUBMIT   => [AccountRole::ADMIN],
+            AccountStateMachine::E_ROLLBACK_APPROVE  => [AccountRole::ADMIN],
+            AccountStateMachine::E_ROLLBACK_REJECT   => [AccountRole::ADMIN],
+            AccountStateMachine::E_ROLLBACK_FREEZE   => [AccountRole::ADMIN],
+        ];
     }
 
     public function definition(): array
     {
-        return $this->fsm->definition();
+        $def = $this->fsm->definition();
+        $def['roles'] = array_map(
+            fn($r) => ['key' => $r, 'label' => AccountRole::LABELS[$r] ?? $r],
+            AccountRole::all()
+        );
+        $def['event_permissions'] = $this->eventPermissions;
+        return $def;
+    }
+
+    /**
+     * 根据操作人标识推断角色（生产环境应从 session/token 解析）。
+     * 约定规则：
+     *   - 前缀 supplier_ / sup_  => SUPPLIER
+     *   - 前缀 reviewer_ / rev_  => REVIEWER
+     *   - 前缀 risk_ / rsk_      => RISK
+     *   - 前缀 admin_ / adm_      => ADMIN
+     *   - 其他                    => 抛出权限异常
+     */
+    private function resolveRole(string $operator): string
+    {
+        $op = strtolower(trim($operator));
+        if ($op === '') {
+            throw new PermissionDeniedException('操作人不能为空，请先登录', '', '');
+        }
+        if (str_starts_with($op, 'supplier_') || str_starts_with($op, 'sup_')) {
+            return AccountRole::SUPPLIER;
+        }
+        if (str_starts_with($op, 'reviewer_') || str_starts_with($op, 'rev_')) {
+            return AccountRole::REVIEWER;
+        }
+        if (str_starts_with($op, 'risk_') || str_starts_with($op, 'rsk_')) {
+            return AccountRole::RISK;
+        }
+        if (str_starts_with($op, 'admin_') || str_starts_with($op, 'adm_') || $op === 'ops-admin') {
+            return AccountRole::ADMIN;
+        }
+        throw new PermissionDeniedException(
+            "操作人「{$operator}」无法识别身份，请使用指定前缀的账号登录（supplier_ / reviewer_ / risk_ / admin_）",
+            '',
+            $operator
+        );
+    }
+
+    /** 校验当前角色是否有权执行指定事件，无权则抛出 PermissionDeniedException。 */
+    private function assertPermission(string $event, string $role): void
+    {
+        $allowed = $this->eventPermissions[$event] ?? null;
+        if ($allowed === null) {
+            throw new StateTransitionException(
+                "未知操作：{$event}",
+                400,
+                '',
+                $event,
+                null,
+                false,
+                false
+            );
+        }
+        if (!in_array($role, $allowed, true)) {
+            $roleLabel = AccountRole::LABELS[$role] ?? $role;
+            $needLabels = array_map(
+                fn($r) => AccountRole::LABELS[$r] ?? $r,
+                $allowed
+            );
+            $eventLabel = $this->eventLabel($event);
+            throw new PermissionDeniedException(
+                "当前角色「{$roleLabel}」无权执行「{$eventLabel}」，请联系以下角色操作：" . implode('、', $needLabels),
+                implode(',', $allowed),
+                $role
+            );
+        }
     }
 
     /** 创建结算账户（初始为 draft）。 */
@@ -131,13 +270,22 @@ final class AccountService
         $rows->execute($params);
         $accounts = $rows->fetchAll();
 
+        $role = null;
+        if (!empty($query['operator'])) {
+            try {
+                $role = $this->resolveRole((string)$query['operator']);
+            } catch (PermissionDeniedException $e) {
+                $role = null;
+            }
+        }
+
         foreach ($accounts as &$row) {
-            $row = $this->decorate($row);
+            $row = $this->decorate($row, $role);
         }
         return $accounts;
     }
 
-    public function get(int $id): array
+    public function get(int $id, ?string $operator = null): array
     {
         $stmt = $this->pdo->prepare('SELECT * FROM accounts WHERE id = :id');
         $stmt->execute([':id' => $id]);
@@ -145,18 +293,30 @@ final class AccountService
         if (!$row) {
             throw new StateException('账户不存在', 404);
         }
-        return $this->decorate($row);
+        $role = null;
+        if ($operator !== null && $operator !== '') {
+            try {
+                $role = $this->resolveRole($operator);
+            } catch (PermissionDeniedException $e) {
+                $role = null;
+            }
+        }
+        return $this->decorate($row, $role);
     }
 
     /** 触发状态迁移：审核通过/驳回、冻结/解冻、停用/启用等。 */
     public function trigger(int $id, string $event, array $input): array
     {
+        $operator = trim((string)($input['operator'] ?? ''));
+        $role = $this->resolveRole($operator);
+        $this->assertPermission($event, $role);
+
         $account = $this->getRaw($id);
         $from = $account['status'];
         $context = [
             'account' => $account,
             'reason'  => trim((string)($input['reason'] ?? '')),
-            'operator' => $input['operator'] ?? 'ops',
+            'operator' => $operator,
         ];
 
         $check = $this->fsm->engine()->canTransition($from, $event, $context);
@@ -250,7 +410,7 @@ final class AccountService
             );
         }
 
-        return $this->get($id);
+        return $this->get($id, $operator);
     }
 
     /** 根据当前事件和状态，获取对应的回滚事件（如果存在）。 */

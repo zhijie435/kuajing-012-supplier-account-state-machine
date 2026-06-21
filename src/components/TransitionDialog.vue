@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, watch, nextTick } from 'vue'
-import { AlertTriangle, CheckCircle2, Lock, Unlock, Send, XCircle, Info, Undo2, RotateCcw } from 'lucide-vue-next'
+import { computed, ref, watch } from 'vue'
+import { AlertTriangle, CheckCircle2, Lock, Unlock, Send, XCircle, Info, Undo2, RotateCcw, RefreshCw } from 'lucide-vue-next'
 import { api } from '@/api/client'
-import type { Account, AccountEvent } from '@/api/types'
+import type { Account, AccountEvent, ApiError, ErrorContext } from '@/api/types'
 import { statusMeta } from '@/lib/statusMeta'
 import BaseModal from './BaseModal.vue'
 
@@ -16,6 +16,7 @@ const emit = defineEmits<{
   close: []
   done: [account: Account]
   error: [message: string]
+  rollback: [event: AccountEvent]
 }>()
 
 interface EventUi {
@@ -159,10 +160,18 @@ const EVENT_UI: Partial<Record<AccountEvent, EventUi>> = {
   },
 }
 
+const ROLLBACK_LABEL: Partial<Record<AccountEvent, string>> = {
+  rollback_submit: '回滚提交',
+  rollback_approve: '回滚审核通过',
+  rollback_reject: '回滚审核驳回',
+  rollback_freeze: '回滚冻结',
+}
+
 const reason = ref('')
 const operator = ref('ops-admin')
 const submitting = ref(false)
 const errorMsg = ref('')
+const errorContext = ref<ErrorContext | null>(null)
 
 const ui = computed<EventUi | null>(() =>
   props.event ? EVENT_UI[props.event] ?? null : null,
@@ -172,12 +181,20 @@ const currentMeta = computed(() =>
   props.account ? statusMeta(props.account.status) : null,
 )
 
+const canRetry = computed(() => errorContext.value?.retryable ?? false)
+const canRollback = computed(() => errorContext.value?.can_rollback && errorContext.value?.rollback_event)
+const rollbackEventLabel = computed(() => {
+  if (!errorContext.value?.rollback_event) return ''
+  return ROLLBACK_LABEL[errorContext.value.rollback_event] ?? '回滚'
+})
+
 watch(
   () => props.open,
   (v) => {
     if (v) {
       reason.value = ''
       errorMsg.value = ''
+      errorContext.value = null
       submitting.value = false
     }
   },
@@ -195,6 +212,7 @@ async function submit() {
   }
   submitting.value = true
   errorMsg.value = ''
+  errorContext.value = null
   try {
     const updated = await api.trigger(props.account.id, props.event, {
       reason: reason.value.trim() || undefined,
@@ -202,11 +220,21 @@ async function submit() {
     })
     emit('done', updated)
   } catch (e) {
-    const msg = (e as Error).message || '操作失败'
+    const err = e as ApiError | Error
+    const msg = err.message || '操作失败'
     errorMsg.value = msg
+    if ('context' in err && err.context) {
+      errorContext.value = err.context
+    }
     emit('error', msg)
   } finally {
     submitting.value = false
+  }
+}
+
+function triggerRollback() {
+  if (errorContext.value?.rollback_event) {
+    emit('rollback', errorContext.value.rollback_event)
   }
 }
 
@@ -249,9 +277,31 @@ const confirmClass = computed(() => {
         class="flex items-start gap-3 rounded-xl border border-state-rejected/40 bg-state-rejected/10 px-4 py-3 shadow-lg shadow-state-rejected/5"
       >
         <XCircle :size="18" class="mt-0.5 flex-shrink-0 text-state-rejected" />
-        <div class="min-w-0">
+        <div class="min-w-0 flex-1">
           <p class="text-sm font-semibold text-state-rejected">操作失败</p>
           <p class="mt-0.5 text-sm text-ink-200">{{ errorMsg }}</p>
+          <div v-if="canRollback || canRetry" class="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              v-if="canRollback"
+              class="btn-ghost text-xs"
+              @click="triggerRollback"
+            >
+              <Undo2 :size="14" />
+              {{ rollbackEventLabel }}
+            </button>
+            <button
+              v-if="canRetry"
+              class="btn-primary text-xs"
+              :disabled="submitting"
+              @click="submit"
+            >
+              <RefreshCw :size="14" :class="{ 'animate-spin': submitting }" />
+              重试
+            </button>
+          </div>
+          <p v-if="canRollback" class="mt-2 text-xs text-ink-400">
+            提示：您可以选择回滚本次操作，将账户恢复到之前的状态
+          </p>
         </div>
       </div>
 
