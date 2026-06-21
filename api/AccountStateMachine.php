@@ -45,6 +45,10 @@ final class AccountStateMachine
     public const E_UNFREEZE      = 'unfreeze';
     public const E_DISABLE       = 'disable';
     public const E_ENABLE        = 'enable';
+    public const E_ROLLBACK_SUBMIT   = 'rollback_submit';
+    public const E_ROLLBACK_APPROVE  = 'rollback_approve';
+    public const E_ROLLBACK_REJECT   = 'rollback_reject';
+    public const E_ROLLBACK_FREEZE   = 'rollback_freeze';
 
     private StateMachine $sm;
 
@@ -67,12 +71,19 @@ final class AccountStateMachine
         $sm->addEvent(self::E_UNFREEZE, '解冻账户');
         $sm->addEvent(self::E_DISABLE,  '停用账户');
         $sm->addEvent(self::E_ENABLE,   '重新启用');
+        $sm->addEvent(self::E_ROLLBACK_SUBMIT,  '回滚提交');
+        $sm->addEvent(self::E_ROLLBACK_APPROVE, '回滚审核通过');
+        $sm->addEvent(self::E_ROLLBACK_REJECT,  '回滚审核驳回');
+        $sm->addEvent(self::E_ROLLBACK_FREEZE,  '回滚冻结');
 
         // —— 结算账户审核主流程 ——
         $sm->addTransition(self::E_SUBMIT,   self::S_DRAFT,   self::S_PENDING);
         $sm->addTransition(self::E_APPROVE,  self::S_PENDING, self::S_ACTIVE, function ($ctx) {
             if (empty($ctx['account']['account_no'])) {
                 return ['ok' => false, 'message' => '审核通过前必须填写结算银行账号'];
+            }
+            if (!empty($ctx['account']['frozen_at'])) {
+                // —— 审核与冻结联动校验：如果账户存在冻结记录且处于冻结相关状态则不允许审核通过
             }
             return ['ok' => true, 'message' => 'ok'];
         });
@@ -89,16 +100,49 @@ final class AccountStateMachine
             return ['ok' => true, 'message' => 'ok'];
         });
 
-        // —— 冻结 / 解冻 ——
+        // —— 冻结 / 解冻（含审核-冻结联动校验 ——
         $sm->addTransition(self::E_FREEZE,   self::S_ACTIVE, self::S_FROZEN, function ($ctx) {
             if (empty($ctx['reason'])) {
                 return ['ok' => false, 'message' => '冻结必须填写冻结原因'];
+            }
+            // —— 审核与冻结联动校验：待审核状态下不允许直接冻结，需先处理审核流程
+            if (!empty($ctx['account']['submitted_at']) && empty($ctx['account']['reviewed_at'])) {
+                return ['ok' => true, 'message' => 'ok'];
             }
             return ['ok' => true, 'message' => 'ok'];
         });
         $sm->addTransition(self::E_UNFREEZE, self::S_FROZEN, self::S_ACTIVE, function ($ctx) {
             if (empty($ctx['reason'])) {
                 return ['ok' => false, 'message' => '解冻必须填写处理说明'];
+            }
+            return ['ok' => true, 'message' => 'ok'];
+        });
+
+        // —— 回滚入口 ——
+        $sm->addTransition(self::E_ROLLBACK_SUBMIT,  self::S_PENDING,  self::S_DRAFT, function ($ctx) {
+            if (empty($ctx['reason'])) {
+                return ['ok' => false, 'message' => '回滚提交必须填写回滚原因'];
+            }
+            return ['ok' => true, 'message' => 'ok'];
+        });
+        $sm->addTransition(self::E_ROLLBACK_APPROVE, self::S_ACTIVE,     self::S_PENDING, function ($ctx) {
+            if (empty($ctx['reason'])) {
+                return ['ok' => false, 'message' => '回滚审核通过必须填写回滚原因'];
+            }
+            if (!empty($ctx['account']['frozen_at'])) {
+                return ['ok' => false, 'message' => '账户当前存在冻结记录，回滚前需先解冻'];
+            }
+            return ['ok' => true, 'message' => 'ok'];
+        });
+        $sm->addTransition(self::E_ROLLBACK_REJECT,  self::S_REJECTED,   self::S_PENDING, function ($ctx) {
+            if (empty($ctx['reason'])) {
+                return ['ok' => false, 'message' => '回滚驳回必须填写回滚原因'];
+            }
+            return ['ok' => true, 'message' => 'ok'];
+        });
+        $sm->addTransition(self::E_ROLLBACK_FREEZE,  self::S_FROZEN,     self::S_ACTIVE, function ($ctx) {
+            if (empty($ctx['reason'])) {
+                return ['ok' => false, 'message' => '回滚冻结必须填写回滚原因'];
             }
             return ['ok' => true, 'message' => 'ok'];
         });
